@@ -1,28 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO (UN SOLO EXCEL CON VARIAS HOJAS)
+MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO
+OUTPUT FINAL: DOS ARCHIVOS XLSX
 
-Qué hace este script:
-1. Carga 4 archivos Excel desde una carpeta de entrada.
-2. Une Contratos_Extraidos + URLDocumento_NombresContratos_NombresSECOPProcedimiento por nombre de archivo.
-3. Une secop_procedimiento_extraidos + URLDocumento_NombresContratos_NombresSECOPProcedimiento por nombre de archivo.
-4. Une Contratos_Extraidos_URL + secop_procedimiento_extraidos_URL por url.
-5. Hace un fuzzy LEFT JOIN entre MinutasYProcedimientosSECOP y estudios_previos_extraidos:
-   - conserva EXACTAMENTE las filas de MinutasYProcedimientosSECOP
-   - une SOLO el mejor match por fila
-   - solo une si la proximidad >= FUZZY_THRESHOLD
-   - agrega la columna Proximidad_Objeto_descripcion
-6. Genera reportes auxiliares.
-7. Guarda TODO en un solo archivo Excel con varias hojas.
+Archivos de salida:
+1. SECOP_NoEstructurado_Consolidado.xlsx
+   Hojas:
+   - Contratos_Extraidos_URL
+   - secop_procedimiento_extraidos_URL
+   - MinutasYProcedimientosSECOP
+   - SECOP_NoEstructurado
+   - SECOP_NoMatch
+   - SECOP_MatchDebil
+   - ResumenMatching
 
-Hojas generadas:
-- Contratos_Extraidos_URL
-- secop_procedimiento_extraidos_URL
-- MinutasYProcedimientosSECOP
-- SECOP_NoEstructurado
-- SECOP_NoMatch
-- SECOP_MatchDebil
-- ResumenMatching
+2. SECOP_NoEstructurado.xlsx
+   - Solo la hoja / tabla final SECOP_NoEstructurado
 """
 
 import math
@@ -50,7 +43,9 @@ FUZZY_THRESHOLD = 80.0
 WEAK_MATCH_MIN = 70.0
 WEAK_MATCH_MAX = 79.99
 MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
+
 OUTPUT_WORKBOOK_NAME = "SECOP_NoEstructurado_Consolidado.xlsx"
+OUTPUT_FINAL_SHEET_NAME = "SECOP_NoEstructurado.xlsx"
 
 
 # =========================================================
@@ -134,11 +129,11 @@ def find_required_files(input_folder: Path) -> Dict[str, Path]:
 
 def explain_excel_permission_error(path: Path) -> str:
     return (
-        f"No se pudo abrir el archivo:\n{path}\n\n"
+        f"No se pudo abrir o guardar el archivo:\n{path}\n\n"
         "Posibles causas:\n"
         "1. El archivo está abierto en Excel.\n"
         "2. OneDrive lo está sincronizando o bloqueando.\n"
-        "3. No tienes permisos de lectura sobre esa carpeta.\n\n"
+        "3. No tienes permisos sobre esa carpeta.\n\n"
         "Prueba esto:\n"
         "- Cierra el archivo Excel.\n"
         "- Pausa OneDrive temporalmente.\n"
@@ -481,32 +476,35 @@ def build_matching_reports(df: pd.DataFrame, proximity_col: str = "Proximidad_Ob
 
 
 # =========================================================
-# EXPORTACIÓN EN UN SOLO EXCEL
+# EXPORTACIÓN
 # =========================================================
 def export_single_workbook(sheets: Dict[str, pd.DataFrame], output_path: Path) -> Path:
     try:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             for sheet_name, df in sheets.items():
-                safe_sheet_name = str(sheet_name)[:31]  # límite de Excel
+                safe_sheet_name = str(sheet_name)[:31]
                 df.to_excel(writer, sheet_name=safe_sheet_name, index=False)
         return output_path
     except PermissionError as e:
-        raise PermissionError(
-            f"No se pudo guardar el archivo:\n{output_path}\n\n"
-            "Posibles causas:\n"
-            "- El archivo ya existe y está abierto en Excel.\n"
-            "- OneDrive lo está sincronizando.\n\n"
-            "Cierra el archivo, pausa OneDrive o guarda en otra carpeta."
-        ) from e
+        raise PermissionError(explain_excel_permission_error(output_path)) from e
+
+
+def export_single_sheet_excel(df: pd.DataFrame, output_path: Path, sheet_name: str = "SECOP_NoEstructurado") -> Path:
+    try:
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+        return output_path
+    except PermissionError as e:
+        raise PermissionError(explain_excel_permission_error(output_path)) from e
 
 
 # =========================================================
 # MAIN
 # =========================================================
 def main():
-    print("=" * 95)
-    print("MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO (UN SOLO EXCEL)")
-    print("=" * 95)
+    print("=" * 100)
+    print("MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO (DOS ARCHIVOS XLSX)")
+    print("=" * 100)
 
     if len(sys.argv) >= 2 and sys.argv[1].strip():
         input_folder = Path(sys.argv[1].strip().strip('"').strip("'"))
@@ -522,7 +520,7 @@ def main():
         output_folder.mkdir(parents=True, exist_ok=True)
     else:
         output_folder = prompt_output_folder(
-            "💾 Ingresa la ruta de la carpeta donde deseas guardar el output: "
+            "💾 Ingresa la ruta de la carpeta donde deseas guardar los outputs: "
         )
 
     print("\n🔎 Verificando archivos requeridos...")
@@ -582,8 +580,9 @@ def main():
 
     no_match_df, weak_match_df, resumen_df = build_matching_reports(secop_no_estructurado)
 
-    print("\n5️⃣ Guardando todo en un solo Excel con varias hojas...")
-    workbook_path = output_folder / OUTPUT_WORKBOOK_NAME
+    print("\n5️⃣ Exportando los dos archivos finales...")
+    consolidated_path = output_folder / OUTPUT_WORKBOOK_NAME
+    final_sheet_path = output_folder / OUTPUT_FINAL_SHEET_NAME
 
     sheets = {
         "Contratos_Extraidos_URL": contratos_url,
@@ -595,12 +594,15 @@ def main():
         "ResumenMatching": resumen_df,
     }
 
-    export_single_workbook(sheets, workbook_path)
+    export_single_workbook(sheets, consolidated_path)
+    export_single_sheet_excel(secop_no_estructurado, final_sheet_path, sheet_name="SECOP_NoEstructurado")
 
     print("\n✅ Proceso terminado correctamente.")
-    print(f"\nArchivo generado:\n   - {workbook_path}")
+    print("\nArchivos generados:")
+    print(f"   - {consolidated_path}")
+    print(f"   - {final_sheet_path}")
 
-    print("\nHojas incluidas:")
+    print("\nHojas incluidas en el consolidado:")
     for name in sheets:
         print(f"   - {name}")
 
