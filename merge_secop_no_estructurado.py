@@ -3,19 +3,10 @@
 MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO
 OUTPUT FINAL: DOS ARCHIVOS XLSX
 
-Archivos de salida:
-1. SECOP_NoEstructurado_Consolidado.xlsx
-   Hojas:
-   - Contratos_Extraidos_URL
-   - secop_procedimiento_extraidos_URL
-   - MinutasYProcedimientosSECOP
-   - SECOP_NoEstructurado
-   - SECOP_NoMatch
-   - SECOP_MatchDebil
-   - ResumenMatching
-
-2. SECOP_NoEstructurado.xlsx
-   - Solo la hoja / tabla final SECOP_NoEstructurado
+AJUSTE SOLICITADO EN PASO 3:
+- "Contratos_Extraidos_URL" y "secop_procedimiento_extraidos_URL" se unen por "url"
+- LEFT JOIN con base principal = "Contratos_Extraidos_URL"
+- "MinutasYProcedimientosSECOP" debe conservar EXACTAMENTE las filas de "Contratos_Extraidos_URL"
 """
 
 import math
@@ -422,6 +413,12 @@ def merge_procedimientos_with_url(procedimientos_df: pd.DataFrame, url_df: pd.Da
 
 
 def merge_minutas_and_procedimientos(contratos_url_df: pd.DataFrame, procedimientos_url_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    PASO 3 AJUSTADO:
+    LEFT JOIN con base principal = Contratos_Extraidos_URL
+    La tabla resultante MinutasYProcedimientosSECOP debe tener exactamente
+    las mismas filas que Contratos_Extraidos_URL.
+    """
     validate_required_columns(contratos_url_df, ["url"], "Contratos_Extraidos_URL")
     validate_required_columns(procedimientos_url_df, ["url"], "secop_procedimiento_extraidos_URL")
 
@@ -435,7 +432,15 @@ def merge_minutas_and_procedimientos(contratos_url_df: pd.DataFrame, procedimien
     if rename_map:
         right = right.rename(columns=rename_map)
 
-    return left.merge(right, on="url", how="left")
+    merged = left.merge(right, on="url", how="left")
+
+    if len(merged) != len(contratos_url_df):
+        raise RuntimeError(
+            f"El paso 3 alteró el número de filas de Contratos_Extraidos_URL. "
+            f"Esperadas: {len(contratos_url_df)}, obtenidas: {len(merged)}"
+        )
+
+    return merged
 
 
 # =========================================================
@@ -551,9 +556,11 @@ def main():
     del df_procedimientos
     del df_url
 
-    print("\n3️⃣ Uniendo Contratos_Extraidos_URL + secop_procedimiento_extraidos_URL por url...")
+    print("\n3️⃣ Uniendo Contratos_Extraidos_URL + secop_procedimiento_extraidos_URL por url (LEFT JOIN base = Contratos_Extraidos_URL)...")
     minutas_procedimientos = merge_minutas_and_procedimientos(contratos_url, procedimientos_url)
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
+    print(f"   Filas esperadas según Contratos_Extraidos_URL: {len(contratos_url)}")
+    print(f"   Filas obtenidas en MinutasYProcedimientosSECOP: {len(minutas_procedimientos)}")
 
     descripcion_col = detect_descripcion_column(minutas_procedimientos)
 
