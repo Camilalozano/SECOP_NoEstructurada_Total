@@ -3,10 +3,11 @@
 MERGE SECOP NO ESTRUCTURADO - VERSIÓN PRO
 OUTPUT FINAL: DOS ARCHIVOS XLSX
 
-AJUSTE SOLICITADO EN PASO 3:
+AJUSTE CLAVE EN PASO 3:
 - "Contratos_Extraidos_URL" y "secop_procedimiento_extraidos_URL" se unen por "url"
 - LEFT JOIN con base principal = "Contratos_Extraidos_URL"
-- "MinutasYProcedimientosSECOP" debe conservar EXACTAMENTE las filas de "Contratos_Extraidos_URL"
+- Se evita que los valores nulos de "url" se crucen entre sí
+- "MinutasYProcedimientosSECOP" conserva EXACTAMENTE las filas de "Contratos_Extraidos_URL"
 """
 
 import math
@@ -416,8 +417,8 @@ def merge_minutas_and_procedimientos(contratos_url_df: pd.DataFrame, procedimien
     """
     PASO 3 AJUSTADO:
     LEFT JOIN con base principal = Contratos_Extraidos_URL
-    La tabla resultante MinutasYProcedimientosSECOP debe tener exactamente
-    las mismas filas que Contratos_Extraidos_URL.
+    Evita que los valores nulos de `url` se crucen entre sí.
+    Resultado: exactamente las mismas filas que Contratos_Extraidos_URL.
     """
     validate_required_columns(contratos_url_df, ["url"], "Contratos_Extraidos_URL")
     validate_required_columns(procedimientos_url_df, ["url"], "secop_procedimiento_extraidos_URL")
@@ -425,6 +426,10 @@ def merge_minutas_and_procedimientos(contratos_url_df: pd.DataFrame, procedimien
     left = contratos_url_df.copy()
     right = procedimientos_url_df.copy()
 
+    # Conserva el orden original del dataframe izquierdo
+    left["_row_id"] = range(len(left))
+
+    # Renombrar columnas repetidas del lado derecho, excepto url
     rename_map = {}
     for col in right.columns:
         if col != "url" and col in left.columns:
@@ -432,7 +437,27 @@ def merge_minutas_and_procedimientos(contratos_url_df: pd.DataFrame, procedimien
     if rename_map:
         right = right.rename(columns=rename_map)
 
-    merged = left.merge(right, on="url", how="left")
+    # Separar filas con url válida y filas con url nula
+    left_non_null = left[left["url"].notna()].copy()
+    left_null = left[left["url"].isna()].copy()
+    right_non_null = right[right["url"].notna()].copy()
+
+    # Merge solo sobre urls válidas
+    merged_non_null = left_non_null.merge(
+        right_non_null,
+        on="url",
+        how="left",
+        validate="m:1",
+    )
+
+    # A las filas con url nula del left no se les cruza nada del right
+    for col in right.columns:
+        if col not in left_null.columns:
+            left_null[col] = pd.NA
+
+    # Reunir resultados y restaurar el orden original
+    merged = pd.concat([merged_non_null, left_null], ignore_index=False, sort=False)
+    merged = merged.sort_values("_row_id").drop(columns=["_row_id"]).reset_index(drop=True)
 
     if len(merged) != len(contratos_url_df):
         raise RuntimeError(
