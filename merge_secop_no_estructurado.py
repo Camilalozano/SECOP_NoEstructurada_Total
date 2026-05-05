@@ -430,7 +430,7 @@ def main():
     )
     minutas_procedimientos["concatenadoID"] = build_concatenado_id(
         minutas_procedimientos,
-        ["numero_documento_contratista", "numero_contrato", "nombre_contratista", "anio_proceso", "OBJETO"],
+        ["numero_documento_contratista", "numero_contrato", "nombre_contratista", "anio_proceso", "Objeto"],
         "MinutasYProcedimientosSECOP",
     )
     print("\n2️⃣ Uniendo MinutasYProcedimientosSECOP + estudios_previos_extraidos con fuzzy LEFT JOIN...")
