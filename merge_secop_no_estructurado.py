@@ -300,6 +300,97 @@ def build_matching_reports(df: pd.DataFrame, proximity_col: str = "Proximidad_Ob
     resumen = pd.DataFrame({"Métrica":["Filas MinutasYProcedimientosSECOP","Filas SECOP_NoEstructurado",f"Matches aceptados (>= {FUZZY_THRESHOLD})",f"No match (< {FUZZY_THRESHOLD})",f"Matches débiles ({WEAK_MATCH_MIN} a {WEAK_MATCH_MAX})","Score promedio","Score máximo","Score mínimo"],"Valor":[len(df),len(df),int((prox >= FUZZY_THRESHOLD).sum()),int((prox < FUZZY_THRESHOLD).sum()),int(((prox >= WEAK_MATCH_MIN) & (prox <= WEAK_MATCH_MAX)).sum()),round(float(prox.mean()),2) if len(prox) else 0,round(float(prox.max()),2) if len(prox) else 0,round(float(prox.min()),2) if len(prox) else 0]})
     return no_match, weak_match, resumen
 
+
+
+def build_data_quality_report(df: pd.DataFrame) -> pd.DataFrame:
+    total_rows = len(df)
+    total_cols = len(df.columns)
+    total_cells = total_rows * total_cols if total_rows and total_cols else 0
+
+    non_null_cells = int(df.notna().sum().sum()) if total_cells else 0
+    empty_after_trim = int(df.applymap(lambda x: isinstance(x, str) and normalize_spaces(x) == "").sum().sum()) if total_cells else 0
+    completeness = round(((non_null_cells - empty_after_trim) / total_cells) * 100, 2) if total_cells else 0.0
+
+    duplicated_rows = int(df.duplicated().sum()) if total_rows else 0
+    uniqueness = round(((total_rows - duplicated_rows) / total_rows) * 100, 2) if total_rows else 0.0
+
+    proximity = pd.to_numeric(df.get("Proximidad_Objeto_descripcion", pd.Series(dtype=float)), errors="coerce")
+    exactitud = round(float((proximity >= FUZZY_THRESHOLD).mean() * 100), 2) if len(proximity) else 0.0
+    precision = round(float(proximity.mean()), 2) if len(proximity) else 0.0
+    confiabilidad = round(float((proximity >= WEAK_MATCH_MIN).mean() * 100), 2) if len(proximity) else 0.0
+
+    normalized_rows = df.fillna("").astype(str).applymap(normalize_spaces) if total_rows else df
+    consistency = round(float((normalized_rows.nunique(dropna=False) <= 1).mean() * 100), 2) if total_cols else 0.0
+
+    key_columns = [
+        "numero_proceso",
+        "numero_contrato",
+        "nombre_contratista",
+        "objeto",
+        CONSOLIDATED_OBLIGATIONS_COLUMN,
+    ]
+    existing_key_columns = [c for c in key_columns if c in df.columns]
+    valid_rows = 0
+    if existing_key_columns and total_rows:
+        valid_rows = int(df[existing_key_columns].fillna("").astype(str).applymap(normalize_spaces).ne("").all(axis=1).sum())
+    validez = round((valid_rows / total_rows) * 100, 2) if total_rows else 0.0
+
+    integridad = round(((1 - (df.isna().any(axis=1).sum() / total_rows)) * 100), 2) if total_rows else 0.0
+
+    quality_table = pd.DataFrame(
+        {
+            "Dimensión": [
+                "Completitud",
+                "Exactitud",
+                "Consistencia",
+                "Validez",
+                "Unicidad",
+                "Integridad",
+                "Precisión",
+                "Confiabilidad",
+            ],
+            "Indicador (%)": [
+                completeness,
+                exactitud,
+                consistency,
+                validez,
+                uniqueness,
+                integridad,
+                precision,
+                confiabilidad,
+            ],
+            "Descripción": [
+                "Porcentaje de celdas diligenciadas (no nulas y no vacías).",
+                f"Registros con score de proximidad >= {FUZZY_THRESHOLD}.",
+                "Columnas con valores homogéneos por normalización textual.",
+                "Registros con campos clave diligenciados.",
+                "Registros no duplicados sobre el total.",
+                "Registros sin valores nulos en ninguna columna.",
+                "Promedio del score de proximidad del matching.",
+                f"Registros con score de proximidad >= {WEAK_MATCH_MIN}.",
+            ],
+        }
+    )
+
+    meta = pd.DataFrame(
+        {
+            "Métrica": ["Total filas", "Total columnas", "Total celdas", "Registros duplicados"],
+            "Valor": [total_rows, total_cols, total_cells, duplicated_rows],
+        }
+    )
+
+    separator = pd.DataFrame({"Dimensión": [""], "Indicador (%)": [""], "Descripción": [""], "Métrica": [""], "Valor": [""]})
+    quality_table_expanded = quality_table.copy()
+    quality_table_expanded["Métrica"] = ""
+    quality_table_expanded["Valor"] = ""
+    meta_expanded = meta.copy()
+    meta_expanded["Dimensión"] = ""
+    meta_expanded["Indicador (%)"] = ""
+    meta_expanded["Descripción"] = ""
+
+    return pd.concat([quality_table_expanded, separator, meta_expanded], ignore_index=True)
+
+
 def export_single_workbook(sheets: Dict[str, pd.DataFrame], output_path: Path) -> Path:
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         for sheet_name, df in sheets.items():
@@ -353,10 +444,11 @@ def main():
     )
     secop_no_estructurado = build_consolidated_obligations_column(secop_no_estructurado)
     no_match_df, weak_match_df, resumen_df = build_matching_reports(secop_no_estructurado)
+    calidad_df = build_data_quality_report(secop_no_estructurado)
     print("\n3️⃣ Exportando los dos archivos finales...")
     consolidated_path = output_folder / OUTPUT_WORKBOOK_NAME
     final_sheet_path = output_folder / OUTPUT_FINAL_SHEET_NAME
-    sheets = {"Contratos_Extraidos_URL": df_contratos, "secop_procedimiento_extraidos_URL": df_procedimientos, "MinutasYProcedimientosSECOP": minutas_procedimientos, "SECOP_NoEstructurado": secop_no_estructurado, "SECOP_NoMatch": no_match_df, "SECOP_MatchDebil": weak_match_df, "ResumenMatching": resumen_df}
+    sheets = {"Contratos_Extraidos_URL": df_contratos, "secop_procedimiento_extraidos_URL": df_procedimientos, "MinutasYProcedimientosSECOP": minutas_procedimientos, "SECOP_NoEstructurado": secop_no_estructurado, "SECOP_NoMatch": no_match_df, "SECOP_MatchDebil": weak_match_df, "ResumenMatching": resumen_df, "CalidadInformacion": calidad_df}
     export_single_workbook(sheets, consolidated_path)
     export_single_sheet_excel(secop_no_estructurado, final_sheet_path, sheet_name="SECOP_NoEstructurado")
     print("\n✅ Proceso terminado correctamente.")
