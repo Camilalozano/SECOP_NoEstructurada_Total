@@ -128,6 +128,17 @@ def normalize_contract_key(value: str) -> str:
             return f"{prefix}-{number.zfill(3)}-{year}"
     return text
 
+def build_concatenado_id(df: pd.DataFrame, columns: List[str], df_name: str) -> pd.Series:
+    validate_required_columns(df, columns, df_name)
+    return (
+        df[columns]
+        .fillna("")
+        .astype(str)
+        .applymap(normalize_spaces)
+        .agg(" ".join, axis=1)
+        .map(normalize_spaces)
+    )
+
 def _rapidfuzz_available() -> bool:
     try:
         import rapidfuzz  # noqa: F401
@@ -284,9 +295,25 @@ def main():
     print("\n1️⃣ Uniendo secop_procedimiento_extraidos + Contratos_Extraidos por numero_proceso / numero_contrato...")
     minutas_procedimientos = merge_procedimientos_with_contratos(df_procedimientos, df_contratos)
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
-    descripcion_col = detect_descripcion_column(minutas_procedimientos)
+    df_estudios["concatenadoID"] = build_concatenado_id(
+        df_estudios,
+        ["IDENTIFICACION", "Nombre_expediente", "año", "objeto"],
+        "estudios_previos_extraidos",
+    )
+    minutas_procedimientos["concatenadoID"] = build_concatenado_id(
+        minutas_procedimientos,
+        ["numero_documento_contratista", "numero_contrato", "nombre_contratista", "anio_proceso", "OBJETO"],
+        "MinutasYProcedimientosSECOP",
+    )
     print("\n2️⃣ Uniendo MinutasYProcedimientosSECOP + estudios_previos_extraidos con fuzzy LEFT JOIN...")
-    secop_no_estructurado = fuzzy_left_merge_best_match(minutas_procedimientos, df_estudios, descripcion_col, "OBJETO", FUZZY_THRESHOLD, "Proximidad_Objeto_descripcion")
+    secop_no_estructurado = fuzzy_left_merge_best_match(
+        minutas_procedimientos,
+        df_estudios,
+        "concatenadoID",
+        "concatenadoID",
+        FUZZY_THRESHOLD,
+        "Proximidad_Objeto_descripcion",
+    )
     no_match_df, weak_match_df, resumen_df = build_matching_reports(secop_no_estructurado)
     print("\n3️⃣ Exportando los dos archivos finales...")
     consolidated_path = output_folder / OUTPUT_WORKBOOK_NAME
