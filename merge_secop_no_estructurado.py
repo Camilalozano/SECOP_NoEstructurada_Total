@@ -425,7 +425,7 @@ def main():
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
     df_estudios["concatenadoID"] = build_concatenado_id(
         df_estudios,
-        ["IDENTIFICACION", "Nombre_expediente", "año", "objeto"],
+        ["IDENTIFICACION", "NOMBRE_EXPEDIENTE", "AÑO", "OBJETO"],
         "estudios_previos_extraidos",
     )
     minutas_procedimientos["concatenadoID"] = build_concatenado_id(
