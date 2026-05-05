@@ -20,6 +20,7 @@ WEAK_MATCH_MAX = 79.99
 MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
 OUTPUT_WORKBOOK_NAME = "SECOP_NoEstructurado_Consolidado.xlsx"
 OUTPUT_FINAL_SHEET_NAME = "SECOP_NoEstructurado.xlsx"
+CONSOLIDATED_OBLIGATIONS_COLUMN = "obligaciones específicas consolidadas"
 
 def normalize_spaces(text: str) -> str:
     text = "" if text is None else str(text)
@@ -39,6 +40,42 @@ def normalize_for_match(text: str) -> str:
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+def is_general_or_empty_obligation(text: str) -> bool:
+    normalized = normalize_for_match(text)
+    if not normalized:
+        return True
+    general_patterns = [
+        r".*\bprevistas\s+en\s+los\s+estudios\s+previos\b.*",
+    ]
+    return any(re.search(pattern, normalized) for pattern in general_patterns)
+
+def build_consolidated_obligations_column(
+    df: pd.DataFrame,
+    source_col_a: str = "obligaciones_específicas",
+    source_col_b: str = "obligaciones específicas del contratista",
+    output_col: str = CONSOLIDATED_OBLIGATIONS_COLUMN,
+) -> pd.DataFrame:
+    validate_required_columns(df, [source_col_a, source_col_b], "SECOP_NoEstructurado")
+    output = df.copy()
+    values_a = output[source_col_a].fillna("").astype(str).map(normalize_spaces)
+    values_b = output[source_col_b].fillna("").astype(str).map(normalize_spaces)
+    consolidated = []
+    for value_a, value_b in zip(values_a, values_b):
+        empty_a = (value_a == "")
+        empty_b = (value_b == "")
+        if empty_a and empty_b:
+            consolidated.append("")
+        elif empty_a:
+            consolidated.append(value_b)
+        elif empty_b:
+            consolidated.append(value_a)
+        elif is_general_or_empty_obligation(value_a):
+            consolidated.append(value_b)
+        else:
+            consolidated.append(value_a)
+    output[output_col] = consolidated
+    return output
 
 def prompt_existing_folder(message: str) -> Path:
     while True:
@@ -314,6 +351,7 @@ def main():
         FUZZY_THRESHOLD,
         "Proximidad_Objeto_descripcion",
     )
+    secop_no_estructurado = build_consolidated_obligations_column(secop_no_estructurado)
     no_match_df, weak_match_df, resumen_df = build_matching_reports(secop_no_estructurado)
     print("\n3️⃣ Exportando los dos archivos finales...")
     consolidated_path = output_folder / OUTPUT_WORKBOOK_NAME
