@@ -127,6 +127,11 @@ def read_excel_file(path: Path) -> pd.DataFrame:
     except Exception as e:
         raise RuntimeError(f"Error leyendo el archivo Excel '{path}': {e}") from e
 
+def filter_estudios_by_year(df: pd.DataFrame, year: int = 2026) -> pd.DataFrame:
+    validate_required_columns(df, ["AÑO"], "estudios_previos_extraidos")
+    year_values = pd.to_numeric(df["AÑO"], errors="coerce")
+    return df.loc[year_values == year].copy()
+
 def validate_required_columns(df: pd.DataFrame, required_columns: List[str], df_name: str) -> None:
     missing = [col for col in required_columns if col not in df.columns]
     if missing:
@@ -420,6 +425,9 @@ def main():
     print(f"   Contratos: {df_contratos.shape}")
     print(f"   Procedimientos: {df_procedimientos.shape}")
     print(f"   Estudios previos: {df_estudios.shape}")
+    estudios_total_rows = len(df_estudios)
+    df_estudios = filter_estudios_by_year(df_estudios, 2026)
+    print(f"   Estudios previos filtrados AÑO==2026: {df_estudios.shape} (de {estudios_total_rows} registros)")
     print("\n1️⃣ Uniendo secop_procedimiento_extraidos + Contratos_Extraidos por numero_proceso / numero_contrato...")
     minutas_procedimientos = merge_procedimientos_with_contratos(df_procedimientos, df_contratos)
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
