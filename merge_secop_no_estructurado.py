@@ -431,22 +431,12 @@ def main():
     print("\n1️⃣ Uniendo secop_procedimiento_extraidos + Contratos_Extraidos por numero_proceso / numero_contrato...")
     minutas_procedimientos = merge_procedimientos_with_contratos(df_procedimientos, df_contratos)
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
-    df_estudios["concatenadoID"] = build_concatenado_id(
-        df_estudios,
-        ["IDENTIFICACION", "NOMBRE_EXPEDIENTE", "AÑO", "OBJETO"],
-        "estudios_previos_extraidos",
-    )
-    minutas_procedimientos["concatenadoID"] = build_concatenado_id(
-        minutas_procedimientos,
-        ["numero_documento_contratista", "numero_contrato", "nombre_contratista", "anio_proceso", "Objeto"],
-        "MinutasYProcedimientosSECOP",
-    )
-    print("\n2️⃣ Uniendo MinutasYProcedimientosSECOP + estudios_previos_extraidos con fuzzy LEFT JOIN...")
+    print("\n2️⃣ Uniendo MinutasYProcedimientosSECOP + estudios_previos_extraidos con fuzzy LEFT JOIN por descripcion / OBJETO...")
     secop_no_estructurado = fuzzy_left_merge_best_match(
         minutas_procedimientos,
         df_estudios,
-        "concatenadoID",
-        "concatenadoID",
+        "descripcion",
+        "OBJETO",
         FUZZY_THRESHOLD,
         "Proximidad_Objeto_descripcion",
     )
