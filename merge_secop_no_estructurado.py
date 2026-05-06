@@ -52,8 +52,8 @@ def is_general_or_empty_obligation(text: str) -> bool:
 
 def build_consolidated_obligations_column(
     df: pd.DataFrame,
-    source_col_a: str = "obligaciones_específicas",
-    source_col_b: str = "obligaciones específicas del contratista",
+    source_col_a: str = "obligaciones_especificas",
+    source_col_b: str = "OBLIGACIONES ESPECÍFICAS DEL CONTRATISTA",
     output_col: str = CONSOLIDATED_OBLIGATIONS_COLUMN,
 ) -> pd.DataFrame:
     validate_required_columns(df, [source_col_a, source_col_b], "SECOP_NoEstructurado")
