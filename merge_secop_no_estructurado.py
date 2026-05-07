@@ -21,6 +21,7 @@ MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
 OUTPUT_WORKBOOK_NAME = "SECOP_NoEstructurado_Consolidado.xlsx"
 OUTPUT_FINAL_SHEET_NAME = "SECOP_NoEstructurado.xlsx"
 CONSOLIDATED_OBLIGATIONS_COLUMN = "obligaciones específicas consolidadas"
+MATCH_MIN_YEAR = 2026
 
 def normalize_spaces(text: str) -> str:
     text = "" if text is None else str(text)
@@ -127,10 +128,10 @@ def read_excel_file(path: Path) -> pd.DataFrame:
     except Exception as e:
         raise RuntimeError(f"Error leyendo el archivo Excel '{path}': {e}") from e
 
-def filter_estudios_by_year(df: pd.DataFrame, year: int = 2026) -> pd.DataFrame:
+def filter_estudios_by_min_year(df: pd.DataFrame, min_year: int = MATCH_MIN_YEAR) -> pd.DataFrame:
     validate_required_columns(df, ["AÑO"], "estudios_previos_extraidos")
     year_values = pd.to_numeric(df["AÑO"], errors="coerce")
-    return df.loc[year_values == year].copy()
+    return df.loc[year_values >= min_year].copy()
 
 def validate_required_columns(df: pd.DataFrame, required_columns: List[str], df_name: str) -> None:
     missing = [col for col in required_columns if col not in df.columns]
@@ -241,29 +242,55 @@ def build_best_match_map_parallel(unique_left_values: List[str], right_choices_n
             partial = future.result(); result.update(partial); done += len(partial); print(f"   Progreso fuzzy: {done}/{n}")
     return result
 
-def fuzzy_left_merge_best_match(left_df: pd.DataFrame, right_df: pd.DataFrame, left_on: str, right_on: str, threshold: float = 80.0, proximity_col: str = "Proximidad_Objeto_descripcion") -> pd.DataFrame:
-    validate_required_columns(left_df, [left_on], "MinutasYProcedimientosSECOP")
-    validate_required_columns(right_df, [right_on], "estudios_previos_extraidos")
-    left = left_df.copy(); right = ensure_unique_right_columns(left_df, right_df.copy(), join_key=right_on); right_key = right_on
+def fuzzy_left_merge_best_match(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    left_on: str,
+    right_on: str,
+    threshold: float = 80.0,
+    proximity_col: str = "Proximidad_Objeto_descripcion",
+    left_year_col: str = "anio_proceso",
+    right_year_col: str = "AÑO",
+    min_year: int = MATCH_MIN_YEAR,
+) -> pd.DataFrame:
+    validate_required_columns(left_df, [left_on, left_year_col], "MinutasYProcedimientosSECOP")
+    validate_required_columns(right_df, [right_on, right_year_col], "estudios_previos_extraidos")
+
+    left = left_df.copy()
+    left_year_values = pd.to_numeric(left[left_year_col], errors="coerce")
+    left["_eligible_year_match"] = left_year_values >= min_year
+    eligible_left_count = int(left["_eligible_year_match"].sum())
+
+    right_year_values = pd.to_numeric(right_df[right_year_col], errors="coerce")
+    right_filtered = right_df.loc[right_year_values >= min_year].copy()
+    right = ensure_unique_right_columns(left_df, right_filtered, join_key=right_on); right_key = right_on
+
     left["_left_match_norm"] = left[left_on].fillna("").astype(str).map(normalize_for_match)
     right["_right_match_norm"] = right[right_key].fillna("").astype(str).map(normalize_for_match)
     right_valid = right[right["_right_match_norm"] != ""].copy().reset_index(drop=True)
-    if right_valid.empty:
+    right_columns_to_add = [c for c in right.columns if c != "_right_match_norm"]
+
+    if right_valid.empty or eligible_left_count == 0:
         result = left.copy(); result[proximity_col] = 0.0
-        for col in right.columns:
-            if col not in {right_on, "_right_match_norm"} and col not in result.columns:
+        for col in right_columns_to_add:
+            if col not in result.columns:
                 result[col] = pd.NA
-        return result.drop(columns=["_left_match_norm"], errors="ignore")
-    unique_left_values = left["_left_match_norm"].fillna("").astype(str).drop_duplicates().tolist()
+        return result.drop(columns=["_left_match_norm", "_eligible_year_match"], errors="ignore")
+
+    eligible_left = left.loc[left["_eligible_year_match"]]
+    unique_left_values = eligible_left["_left_match_norm"].fillna("").astype(str).drop_duplicates().tolist()
     right_choices_norm = right_valid["_right_match_norm"].tolist()
-    print(f"🔎 Iniciando fuzzy match sobre {len(unique_left_values)} descripciones únicas...")
+    print(f"🔎 Iniciando fuzzy match sobre {len(unique_left_values)} descripciones únicas con {left_year_col}>={min_year}...")
+    print(f"   - registros MinutasYProcedimientosSECOP elegibles: {eligible_left_count}/{len(left)}")
+    print(f"   - registros estudios_previos_extraidos elegibles: {len(right_valid)}/{len(right_df)}")
     print(f"   - rapidfuzz disponible: {_rapidfuzz_available()}")
     print(f"   - hilos usados: {min(MAX_WORKERS, max(1, len(unique_left_values)))}")
     best_match_map = build_best_match_map_parallel(unique_left_values, right_choices_norm)
-    output_rows = []; right_columns_to_add = [c for c in right_valid.columns if c != "_right_match_norm"]
+    output_rows = []
     for _, row in left.iterrows():
         row_dict = row.to_dict(); query_norm = row_dict.get("_left_match_norm", "")
-        best_idx, best_score = best_match_map.get(query_norm, (None, 0.0))
+        is_year_eligible = bool(row_dict.get("_eligible_year_match", False))
+        best_idx, best_score = best_match_map.get(query_norm, (None, 0.0)) if is_year_eligible else (None, 0.0)
         row_dict[proximity_col] = round(best_score, 2)
         if best_idx is not None and best_score >= threshold:
             matched = right_valid.iloc[best_idx].to_dict(); matched.pop("_right_match_norm", None)
@@ -279,7 +306,7 @@ def fuzzy_left_merge_best_match(left_df: pd.DataFrame, right_df: pd.DataFrame, l
                 if col not in row_dict:
                     row_dict[col] = pd.NA
         output_rows.append(row_dict)
-    result = pd.DataFrame(output_rows).drop(columns=["_left_match_norm"], errors="ignore")
+    result = pd.DataFrame(output_rows).drop(columns=["_left_match_norm", "_eligible_year_match"], errors="ignore")
     if len(result) != len(left_df):
         raise RuntimeError(f"El fuzzy left join alteró el número de filas. Esperadas: {len(left_df)}, obtenidas: {len(result)}")
     return result
@@ -426,8 +453,8 @@ def main():
     print(f"   Procedimientos: {df_procedimientos.shape}")
     print(f"   Estudios previos: {df_estudios.shape}")
     estudios_total_rows = len(df_estudios)
-    df_estudios = filter_estudios_by_year(df_estudios, 2026)
-    print(f"   Estudios previos filtrados AÑO==2026: {df_estudios.shape} (de {estudios_total_rows} registros)")
+    df_estudios = filter_estudios_by_min_year(df_estudios, MATCH_MIN_YEAR)
+    print(f"   Estudios previos filtrados AÑO>={MATCH_MIN_YEAR}: {df_estudios.shape} (de {estudios_total_rows} registros)")
     print("\n1️⃣ Uniendo secop_procedimiento_extraidos + Contratos_Extraidos por numero_proceso / numero_contrato...")
     minutas_procedimientos = merge_procedimientos_with_contratos(df_procedimientos, df_contratos)
     print(f"   Resultado MinutasYProcedimientosSECOP: {minutas_procedimientos.shape}")
