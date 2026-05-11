@@ -21,22 +21,6 @@ MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
 OUTPUT_WORKBOOK_NAME = "SECOP_NoEstructurado_Consolidado.xlsx"
 OUTPUT_FINAL_SHEET_NAME = "SECOP_NoEstructurado.xlsx"
 CONSOLIDATED_OBLIGATIONS_COLUMN = "obligaciones específicas consolidadas"
-FINAL_OUTPUT_COLUMNS = [
-    "numero_proceso",
-    "entidad_adjudicataria",
-    "numero_documento_contratista",
-    "Objeto",
-    CONSOLIDATED_OBLIGATIONS_COLUMN,
-    "precio_estimado_total",
-    "fecha_publicacion_proceso",
-    "fecha_terminacion_contrato",
-    "duracion_contrato",
-    "Tipo_contrato",
-    "url",
-    "descripcion",
-    "OBJETO",
-    "Proximidad_Objeto_descripcion",
-]
 MATCH_MIN_YEAR = 2026
 
 def normalize_spaces(text: str) -> str:
@@ -445,14 +429,6 @@ def export_single_workbook(sheets: Dict[str, pd.DataFrame], output_path: Path) -
             df.to_excel(writer, sheet_name=str(sheet_name)[:31], index=False)
     return output_path
 
-def select_final_output_columns(
-    df: pd.DataFrame,
-    columns: List[str] = FINAL_OUTPUT_COLUMNS,
-    df_name: str = "SECOP_NoEstructurado",
-) -> pd.DataFrame:
-    validate_required_columns(df, columns, df_name)
-    return df.loc[:, columns].copy()
-
 def export_single_sheet_excel(df: pd.DataFrame, output_path: Path, sheet_name: str = "SECOP_NoEstructurado") -> Path:
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
@@ -497,10 +473,9 @@ def main():
     print("\n3️⃣ Exportando los dos archivos finales...")
     consolidated_path = output_folder / OUTPUT_WORKBOOK_NAME
     final_sheet_path = output_folder / OUTPUT_FINAL_SHEET_NAME
-    secop_no_estructurado_final = select_final_output_columns(secop_no_estructurado)
     sheets = {"Contratos_Extraidos_URL": df_contratos, "secop_procedimiento_extraidos_URL": df_procedimientos, "MinutasYProcedimientosSECOP": minutas_procedimientos, "SECOP_NoEstructurado": secop_no_estructurado, "SECOP_NoMatch": no_match_df, "SECOP_MatchDebil": weak_match_df, "ResumenMatching": resumen_df, "CalidadInformacion": calidad_df}
     export_single_workbook(sheets, consolidated_path)
-    export_single_sheet_excel(secop_no_estructurado_final, final_sheet_path, sheet_name="SECOP_NoEstructurado")
+    export_single_sheet_excel(secop_no_estructurado, final_sheet_path, sheet_name="SECOP_NoEstructurado")
     print("\n✅ Proceso terminado correctamente.")
     print(f"\nArchivos generados:\n   - {consolidated_path}\n   - {final_sheet_path}")
 
