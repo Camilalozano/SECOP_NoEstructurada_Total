@@ -78,6 +78,68 @@ def build_consolidated_obligations_column(
     output[output_col] = consolidated
     return output
 
+
+def clean_consolidated_obligations_text(text: str) -> str:
+    """
+    Limpia la variable 'obligaciones específicas consolidadas' después de consolidarla.
+
+    Reglas aplicadas:
+    1. Elimina cualquier texto introductorio antes del primer numeral 1.
+    2. Elimina pies de página frecuentes extraídos desde las minutas.
+    3. Corta el texto desde 'CLÁUSULA TERCERA' / 'CLAUSULA TERCERA' en adelante.
+    4. Normaliza espacios para dejar el texto listo para certificados y análisis.
+    """
+    text = normalize_spaces(text)
+    if not text:
+        return ""
+
+    # Regla 3: cortar desde CLÁUSULA TERCERA o CLAUSULA TERCERA en adelante.
+    clausula_tercera_pattern = re.compile(
+        r"\bCL[ÁA]USULA\s+TERCERA\b.*$",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(clausula_tercera_pattern, "", text)
+
+    # Regla 2: eliminar pies de página o textos institucionales no contractuales.
+    footer_patterns = [
+        r"Piensa\s+en\s+el\s+medio\s+ambiente\s+antes\s+de\s+imprimir\s+este\s+documento.*?(?=\s+\d+\.\s|$)",
+        r"Cualquier\s+copia\s+impresa\s+de\s+este\s+documento\s+se\s+considera\s+como\s+COPIA\s+NO\s+CONTROLADA.*?(?=\s+\d+\.\s|$)",
+        r"LOS\s+DATOS\s+PROPORCIONADOS\s+SER[ÁA]N\s+TRATADOS\s+DE\s+ACUERDO\s+CON\s+LA\s+LEY\s+1581\s+DE\s+2012.*?(?=\s+\d+\.\s|$)",
+        r"Minuta\s+Contrato\s+para\s+Prestaci[óo]n\s+de\s+Servicios\s+Profesionales\s+y\s+de\s+Apoyo\s+a\s+la\s+Gesti[óo]n\s+VERSI[ÓO]N\s*:?\s*\d+\s*\d*\.?,?",
+        r"https?://agenciaatenea\.gov\.co/?",
+        r"Cr\s+10\s*#\s*28-49.*?www\.agenciaatenea\.gov\.co",
+    ]
+    for pattern in footer_patterns:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Regla 1: conservar desde el primer numeral 1. / 1) / 1- / 1:
+    first_number_pattern = re.search(r"(?:^|\s)(1\s*[\.:\)\-]\s+)", text)
+    if first_number_pattern:
+        text = text[first_number_pattern.start(1):]
+
+    # Limpieza final de espacios y separadores.
+    text = normalize_spaces(text)
+    text = re.sub(r"\s+([\.,;:])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text
+
+
+def clean_consolidated_obligations_column(
+    df: pd.DataFrame,
+    column: str = CONSOLIDATED_OBLIGATIONS_COLUMN,
+) -> pd.DataFrame:
+    """
+    Aplica la limpieza técnica directamente sobre la columna consolidada de obligaciones.
+
+    La transformación se guarda en la misma variable:
+    'obligaciones específicas consolidadas'.
+    No crea columnas auxiliares ni imprime reportes de limpieza en consola.
+    """
+    validate_required_columns(df, [column], "SECOP_NoEstructurado")
+    output = df.copy()
+    output[column] = output[column].fillna("").astype(str).map(clean_consolidated_obligations_text)
+    return output
+
 def prompt_existing_folder(message: str) -> Path:
     while True:
         folder = input(message).strip().strip('"').strip("'")
@@ -468,6 +530,7 @@ def main():
         "Proximidad_Objeto_descripcion",
     )
     secop_no_estructurado = build_consolidated_obligations_column(secop_no_estructurado)
+    secop_no_estructurado = clean_consolidated_obligations_column(secop_no_estructurado)
     no_match_df, weak_match_df, resumen_df = build_matching_reports(secop_no_estructurado)
     calidad_df = build_data_quality_report(secop_no_estructurado)
     print("\n3️⃣ Exportando los dos archivos finales...")
