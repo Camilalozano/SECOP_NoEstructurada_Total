@@ -14,8 +14,8 @@ INPUT_FILES = {
     "procedimientos": "secop_procedimiento_extraidos.xlsx",
     "estudios": "estudios_previos_extraidos.xlsx",
 }
-FUZZY_THRESHOLD = 80.0
-WEAK_MATCH_MIN = 70.0
+FUZZY_THRESHOLD = 40.0
+WEAK_MATCH_MIN = 40.0
 WEAK_MATCH_MAX = 79.99
 MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4)))
 OUTPUT_WORKBOOK_NAME = "SECOP_NoEstructurado_Consolidado.xlsx"
